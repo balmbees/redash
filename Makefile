@@ -1,57 +1,22 @@
-.PHONY: compose_build up test_db create_database clean down bundle tests lint backend-unit-tests frontend-unit-tests test build watch start redis-cli bash
+$(eval REV=$(shell git rev-parse HEAD | cut -c1-7))
 
-compose_build:
-	docker-compose build
+docker/login:
+	$$(aws ecr get-login --no-include-email --region ap-northeast-2)
 
-up:
-	docker-compose up -d --build
+# Build docker target
+docker/build:
+	docker build -f ./Dockerfile -t moim-redash .	
+	
+# Tag docker image
+docker/tag:	
+	docker tag moim-redash:latest 921281748045.dkr.ecr.ap-northeast-2.amazonaws.com/moim-redash:latest
+	docker tag moim-redash:latest 921281748045.dkr.ecr.ap-northeast-2.amazonaws.com/moim-redash:$(REV)	
 
-test_db:
-	@for i in `seq 1 5`; do \
-		if (docker-compose exec postgres sh -c 'psql -U postgres -c "select 1;"' 2>&1 > /dev/null) then break; \
-		else echo "postgres initializing..."; sleep 5; fi \
-	done
-	docker-compose exec postgres sh -c 'psql -U postgres -c "drop database if exists tests;" && psql -U postgres -c "create database tests;"'
+# Push to registry
+docker/push:	
+	docker push 921281748045.dkr.ecr.ap-northeast-2.amazonaws.com/moim-redash:latest
+	docker push 921281748045.dkr.ecr.ap-northeast-2.amazonaws.com/moim-redash:$(REV)	
 
-create_database:
-	docker-compose run server create_db
+# Build docker image and push to AWS registry
+docker: docker/login docker/build docker/tag docker/push
 
-clean:
-	docker-compose down && docker-compose rm
-
-down:
-	docker-compose down
-
-bundle:
-	docker-compose run server bin/bundle-extensions
-
-tests:
-	docker-compose run server tests
-
-lint:
-	./bin/flake8_tests.sh
-
-backend-unit-tests: up test_db
-	docker-compose run --rm --name tests server tests
-
-frontend-unit-tests: bundle
-	CYPRESS_INSTALL_BINARY=0 PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1 npm ci
-	npm run bundle
-	npm test
-
-test: lint backend-unit-tests frontend-unit-tests
-
-build: bundle
-	npm run build
-
-watch: bundle
-	npm run watch
-
-start: bundle
-	npm run start
-
-redis-cli:
-	docker-compose run --rm redis redis-cli -h redis
-
-bash:
-	docker-compose run --rm server bash

@@ -1099,6 +1099,7 @@ class Dashboard(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model
     tags = Column(
         "tags", MutableList.as_mutable(postgresql.ARRAY(db.Unicode)), nullable=True
     )
+    group_ids = Column(db.String(256), nullable=True)
 
     __tablename__ = "dashboards"
     __mapper_args__ = {"version_id_col": version}
@@ -1112,6 +1113,27 @@ class Dashboard(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model
 
     @classmethod
     def all(cls, org, group_ids, user_id):
+
+        conditions = [
+            Dashboard.is_archived == False,
+            (
+                DataSourceGroup.group_id.in_(group_ids)
+                | (Dashboard.user_id == user_id)
+            ),
+            Dashboard.org == org,
+        ]
+
+        group_conditions = [
+            Dashboard.group_ids == None
+        ]
+
+        for group_id in group_ids:
+            group_conditions.append(
+                Dashboard.group_ids.like(f'%{group_id}%')
+            )
+        
+        conditions.append(or_(*group_conditions))
+        
         query = (
             Dashboard.query.options(
                 joinedload(Dashboard.user).load_only(
@@ -1124,14 +1146,7 @@ class Dashboard(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model
             .outerjoin(
                 DataSourceGroup, Query.data_source_id == DataSourceGroup.data_source_id
             )
-            .filter(
-                Dashboard.is_archived == False,
-                (
-                    DataSourceGroup.group_id.in_(group_ids)
-                    | (Dashboard.user_id == user_id)
-                ),
-                Dashboard.org == org,
-            )
+            .filter(*conditions)
             .distinct()
         )
 
