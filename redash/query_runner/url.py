@@ -1,57 +1,38 @@
-import sys
-import urllib2
-
-from redash.query_runner import *
+from redash.query_runner import BaseHTTPQueryRunner, register
+from redash.utils import deprecated
 
 
-class Url(BaseQueryRunner):
-    @classmethod
-    def configuration_schema(cls):
-        return {
-            'type': 'object',
-            'properties': {
-                'url': {
-                    'type': 'string',
-                    'title': 'URL base path'
-                }
-            }
-        }
+@deprecated()
+class Url(BaseHTTPQueryRunner):
+    requires_url = False
 
-    @classmethod
-    def annotate_query(cls):
-        return False
+    def test_connection(self):
+        pass
 
-    def run_query(self, query):
+    def run_query(self, query, user):
         base_url = self.configuration.get("url", None)
 
-        try:
-            error = None
-            query = query.strip()
+        query = query.strip()
 
-            if base_url is not None and base_url != "":
-                if query.find("://") > -1:
-                    return None, "Accepting only relative URLs to '%s'" % base_url
+        if base_url is not None and base_url != "":
+            if query.find("://") > -1:
+                return None, "Accepting only relative URLs to '%s'" % base_url
 
-            if base_url is None:
-                base_url = ""
+        if base_url is None:
+            base_url = ""
 
-            url = base_url + query
+        url = base_url + query
 
-            json_data = urllib2.urlopen(url).read().strip()
+        response, error = self.get_response(url)
+        if error is not None:
+            return None, error
 
-            if not json_data:
-                error = "Error reading data from '%s'" % url
+        json_data = response.content.strip()
 
-            return json_data, error
+        if json_data:
+            return json_data, None
+        else:
+            return None, "Got empty response from '{}'.".format(url)
 
-        except urllib2.URLError as e:
-            return None, str(e)
-        except KeyboardInterrupt:
-            error = "Query cancelled by user."
-            json_data = None
-        except Exception as e:
-            raise sys.exc_info()[1], None, sys.exc_info()[2]
-
-        return json_data, error
 
 register(Url)

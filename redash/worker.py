@@ -1,50 +1,56 @@
-from random import randint
-from celery import Celery
 from datetime import timedelta
-from celery.schedules import crontab
-from redash import settings, __version__
+from functools import partial
+
+from flask import current_app
+import logging
+
+from rq import get_current_job
+from rq.decorators import job as rq_job
+
+from redash import (
+    create_app,
+    extensions,
+    settings,
+    redis_connection,
+    rq_redis_connection,
+)
+from redash.tasks.worker import Queue as RedashQueue
 
 
-celery = Celery('redash',
-                broker=settings.CELERY_BROKER,
-                include='redash.tasks')
+default_operational_queues = ["periodic", "emails", "default"]
+default_query_queues = ["scheduled_queries", "queries", "schemas"]
+default_queues = default_operational_queues + default_query_queues
 
-celery_schedule = {
-    'refresh_queries': {
-        'task': 'redash.tasks.refresh_queries',
-        'schedule': timedelta(seconds=30)
-    },
-    'cleanup_tasks': {
-        'task': 'redash.tasks.cleanup_tasks',
-        'schedule': timedelta(minutes=5)
-    },
-    'refresh_schemas': {
-        'task': 'redash.tasks.refresh_schemas',
-        'schedule': timedelta(minutes=30)
-    }
-}
 
-if settings.VERSION_CHECK:
-    celery_schedule['version_check'] = {
-        'task': 'redash.tasks.version_check',
-        # We need to schedule the version check to run at a random hour/minute, to spread the requests from all users
-        # evenly.
-        'schedule': crontab(minute=randint(0, 59), hour=randint(0, 23))
-    }
+class StatsdRecordingJobDecorator(rq_job):  # noqa
+    """
+    RQ Job Decorator mixin that uses our Queue class to ensure metrics are accurately incremented in Statsd
+    """
 
-if settings.QUERY_RESULTS_CLEANUP_ENABLED:
-    celery_schedule['cleanup_query_results'] = {
-        'task': 'redash.tasks.cleanup_query_results',
-        'schedule': timedelta(minutes=5)
-    }
+    queue_class = RedashQueue
 
-celery.conf.update(CELERY_RESULT_BACKEND=settings.CELERY_BACKEND,
-                   CELERYBEAT_SCHEDULE=celery_schedule,
-                   CELERY_TIMEZONE='UTC')
 
-if settings.SENTRY_DSN:
-    from raven import Client
-    from raven.contrib.celery import register_signal, register_logger_signal
+job = partial(StatsdRecordingJobDecorator, connection=rq_redis_connection)
 
-    client = Client(settings.SENTRY_DSN, release=__version__)
-    register_signal(client)
+
+class CurrentJobFilter(logging.Filter):
+    def filter(self, record):
+        current_job = get_current_job()
+
+        record.job_id = current_job.id if current_job else ""
+        record.job_func_name = current_job.func_name if current_job else ""
+
+        return True
+
+
+def get_job_logger(name):
+    logger = logging.getLogger("rq.job." + name)
+
+    handler = logging.StreamHandler()
+    handler.formatter = logging.Formatter(settings.RQ_WORKER_JOB_LOG_FORMAT)
+    handler.addFilter(CurrentJobFilter())
+
+    logger.addHandler(handler)
+    logger.propagate = False
+
+    return logger
