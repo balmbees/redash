@@ -51,13 +51,16 @@ def send_verify_email(user, org):
     send_mail.delay([user.email], subject, html_content, text_content)
 
 
-def send_invite_email(inviter, invited, invite_url, org):
+def send_invite_email(inviter, invited, invite_url, org, direct=False):
     context = dict(inviter=inviter, invited=invited, org=org, invite_url=invite_url)
     html_content = render_template("emails/invite.html", **context)
     text_content = render_template("emails/invite.txt", **context)
     subject = "{} invited you to join Redash".format(inviter.name)
 
-    send_mail.delay([invited.email], subject, html_content, text_content)
+    if not direct:
+        send_mail.delay([invited.email], subject, html_content, text_content)
+    else:
+        send_mail([invited.email], subject, html_content, text_content)
 
 
 def send_password_reset_email(user):

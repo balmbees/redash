@@ -56,8 +56,13 @@ def invite_user(org, inviter, user, send_email=True):
     d = user.to_dict()
 
     invite_url = invite_link_for_user(user)
+
+    print("!!!!!!!!!!!!!!!!!!!! Invite !!!!!!!!!!!!!!!")
+    print(f'{settings.email_server_is_configured()}')
+    
     if settings.email_server_is_configured() and send_email:
-        send_invite_email(inviter, user, invite_url, org)
+        print(f'call send_invite_email')
+        send_invite_email(inviter, user, invite_url, org, True)
     else:
         d["invite_link"] = invite_url
 
