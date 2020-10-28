@@ -157,9 +157,13 @@ class DashboardResource(BaseResource):
         dashboard = get_object_or_404(fn, dashboard_id, self.current_org)
 
         valid = False
-        for group_id in self.current_user.group_ids:
-            if str(group_id) in dashboard.group_ids:
-                valid = True
+
+        if not dashboard.group_ids:
+            valid = True
+        else:
+            for group_id in self.current_user.group_ids:
+                if str(group_id) in dashboard.group_ids:
+                    valid = True
         
         if not valid:
             abort(404)
